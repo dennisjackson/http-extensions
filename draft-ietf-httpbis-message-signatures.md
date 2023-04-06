@@ -87,6 +87,7 @@ informative:
     RFC7239:
     JWS: RFC7515
     RFC7807:
+    RFC8725:
     RFC8792:
     BCP195:
     CLIENT-CERT: I-D.ietf-httpbis-client-cert-field
@@ -1213,7 +1214,7 @@ In order to verify a signature, a verifier MUST follow the following algorithm:
     in which the signature is presented. If a key is identified that the verifier does not know, does
     not trust for this request, or does not match something preconfigured, the verification MUST fail.
 6. Determine the algorithm to apply for verification:
-    0. Start with the set of allowable algorithms known to the application. If any of the following steps selects an algorithm that is not in this set, the signature validation fails.
+    0. Start with the set of allowable algorithms known to the application for the selected verification key. If any of the following steps selects an algorithm that is not in this set, the signature validation fails.
     1. If the algorithm is known through external means such as static configuration or external protocol
         negotiation, the verifier will use this algorithm.
     2. If the algorithm can be determined from the keying material, such as through an algorithm field
@@ -1985,6 +1986,10 @@ In this example, Alice intends to send a signed request to Bob, and Bob wants to
 
 To mitigate this, Bob can sign more portions of the request message than just the Signature field, in order to more fully differentiate Alice's message from Mallory's. Applications using this feature, particularly for non-repudiation purposes, can stipulate that any components required in the original signature also be covered separately in the second signature. For signed messages, requiring coverage of the corresponding Signature-Input field of the first signature ensures that unique items such as nonces and timestamps are also covered sufficiently by the second signature.
 
+### Non-deterministic Signature Primitives {#security-nondeterministic}
+
+Some cryptographic primitives such as RSA PSS and ECDSA have non-deterministic outputs, which include some amount of entropy within the algorithm. For such algorithms, multiple signatures generated in succession will not match. A lazy implementation of a verifier could ignore this distinction and simply check for the same value being created by re-signing the signature base. Such an implementation would work for deterministic algorithms such as HMAC and EdDSA but fail to verify valid signatures made using non-deterministic algorithms. It is therefore important that a verifier always use the correctly-defined verification function for the algorithm in question and not do a simple comparison.
+
 ### Key Theft {#security-keys}
 
 A foundational assumption of signature-based cryptographic systems is that the signing key is not compromised by an attacker. If the keys used to sign the message are exfiltrated or stolen, the attacker will be able to generate their own signatures using those keys. As a consequence, signers have to protect any signing key material from exfiltration, capture, and use by an attacker.
@@ -1997,21 +2002,13 @@ The HTTP Message Signatures specification allows for both asymmetric and symmetr
 
 Where possible, asymmetric methods or secure key agreement mechanisms should be used in order to avoid this type of attack. When symmetric methods are used, distribution of the key material needs to be protected by the overall system. One technique for this is the use of separate cryptographic modules that separate the verification process (and therefore the key material) from other code, minimizing the vulnerable attack surface. Another technique is the use of key derivation functions that allow the signer and verifier to agree on unique keys for each message without having to share the key values directly.
 
-Additionally, if symmetric algorithms are allowed within a system, special care must be taken to avoid [key downgrade attacks](#security-keydowngrade).
-
 ### Key Specification Mix-Up {#security-keymixup}
 
-The existence of a valid signature on an HTTP message is not sufficient to prove that the message has been signed by the appropriate party. It is up to the verifier to ensure that a given key and algorithm are appropriate for the message in question. If the verifier does not perform such a step, an attacker could substitute their own signature using their own key on a message and force a verifier to accept and process it. To combat this, the verifier needs to ensure that not only does the signature validate for a message, but that the key and algorithm used are appropriate.
+The existence of a valid signature on an HTTP message is not sufficient to prove that the message has been signed by the appropriate party. It is up to the verifier to ensure that a given key and algorithm are appropriate for the message in question. If the verifier does not perform such a step, an attacker could substitute their own signature using their own key on a message and force a verifier to accept and process it.To combat this, the verifier needs to ensure that not only does the signature validate for a message, but that the key and algorithm used are appropriate as detailed in step 6 part 1 of [verify](#verify).
 
-### Non-deterministic Signature Primitives {#security-nondeterministic}
+For example of an attack  can occur when an asymmetric algorithm is expected, such as RSA-PSS, but an attacker substitutes a signature using symmetric algorithm, such as HMAC. A naive verifier implementation could use the value of the public RSA key as the input to the HMAC verification function. Since the public key is known to the attacker, this would allow the attacker to create a valid HMAC signature against this known key. To prevent this, the verifier needs to ensure that both the key material and the algorithm are appropriate for the usage in question. Failure to carry out this check has resulted in numerous issues in similar specifications, as identified in {{RFC8725}}.
 
-Some cryptographic primitives such as RSA PSS and ECDSA have non-deterministic outputs, which include some amount of entropy within the algorithm. For such algorithms, multiple signatures generated in succession will not match. A lazy implementation of a verifier could ignore this distinction and simply check for the same value being created by re-signing the signature base. Such an implementation would work for deterministic algorithms such as HMAC and EdDSA but fail to verify valid signatures made using non-deterministic algorithms. It is therefore important that a verifier always use the correctly-defined verification function for the algorithm in question and not do a simple comparison.
-
-### Key and Algorithm Specification Downgrades {#security-keydowngrade}
-
-Applications of this specification need to protect against key specification downgrade attacks. For example, the same RSA key can be used for both RSA-PSS and RSA v1.5 signatures. If an application expects a key to only be used with RSA-PSS, it needs to reject signatures for that key using the weaker RSA 1.5 specification.
-
-Another example of a downgrade attack occurs when an asymmetric algorithm is expected, such as RSA-PSS, but an attacker substitutes a signature using symmetric algorithm, such as HMAC. A naive verifier implementation could use the value of the public RSA key as the input to the HMAC verification function. Since the public key is known to the attacker, this would allow the attacker to create a valid HMAC signature against this known key. To prevent this, the verifier needs to ensure that both the key material and the algorithm are appropriate for the usage in question. Additionally, while this specification does allow runtime specification of the algorithm using the `alg` signature parameter, applications are encouraged to use other mechanisms such as static configuration or higher protocol-level algorithm specification instead, preventing an attacker from substituting the algorithm specified.
+Applications of this specification also need to protect against key specification downgrade attacks. For example, the same RSA key can be used for both RSA-PSS and RSA v1.5 signatures. If an application expects a key to only be used with RSA-PSS, it needs to reject signatures for that key using the weaker RSA 1.5 specification.
 
 ## Matching Covered Components to Message
 
